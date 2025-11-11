@@ -120,7 +120,7 @@ func LoginHandler(w http.ResponseWriter, r *http.Request) {
 	filter := bson.M{"username": creds.Username}
 
 	// Create a request context with a timeout
-	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 	defer cancel()
 
 	// Execute the query

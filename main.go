@@ -21,7 +21,7 @@ func main() {
 	// This uses the global MongoClient (defined in db-logic.go)
 	defer func() {
 		log.Println("Gracefully disconnecting MongoDB client...")
-		disconnectCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		disconnectCtx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
 
 		// This line assumes MongoClient is a global variable from db-logic.go
