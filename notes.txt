@@ -1,0 +1,15 @@
+tutorial at: https://www.digitalocean.com/community/tutorials/how-to-make-an-http-server-in-go
+
+** all .go file must have the same package name as the containing folder
+
+curl http://localhost:4444/hello
+curl 'http://localhost:3333?first=1&second=' -query string &
+curl -X POST -d 'This is the body' 'http://localhost:3333?first=1&second=' -body
+curl -X POST -F 'myName=Sammy' 'http://localhost:3333/hello' -form
+curl -v -X POST 'http://localhost:3333/hello' -verbose output
+
+** Check your IP in mongodb atlas, make sure your current IP is added
+** use go run . to run main function and take into account other go files with the same package name
+
+1. Server interaction flow
+    - getRoot and getHello file, these files accept 2 argument, 1st argument controls response, 2nd argument gets information
