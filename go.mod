@@ -1,6 +1,6 @@
 module github.com/piCreature99/go-mongo-api-server
 
-go 1.25.3
+go 1.25
 
 require go.mongodb.org/mongo-driver/v2 v2.4.0
 
