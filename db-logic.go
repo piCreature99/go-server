@@ -26,7 +26,7 @@ func ConnectDB() error {
 			"usage-examples/#environment-variable")
 	}
 	// Use context.Background() for the initial connection attempt
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
 	var err error
