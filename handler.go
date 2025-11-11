@@ -473,6 +473,12 @@ func getHello(w http.ResponseWriter, r *http.Request) {
 	io.WriteString(w, fmt.Sprintf("Hello, %s!\n", myName))
 }
 func Server() {
+
+	// with a server, you have to read the PORT env variabled assigned by the server
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080" //Fallback for local development if PORT is not set
+	}
 	jwtSecret = os.Getenv("JWT_SECRET")
 	if jwtSecret == "" {
 		fmt.Println("FATAL: JWT_SECRET is missing.")
@@ -491,54 +497,56 @@ func Server() {
 	// NEW: Protected route using the AuthMiddleware
 	mux.HandleFunc("/profile", AuthMiddleware(ProfileHandler))
 
-	ctx, cancelCtx := context.WithCancel(context.Background()) // ctx is context.Context
-	serverOne := &http.Server{                                 // initialize a struct
+	// ctx, cancelCtx := context.WithCancel(context.Background()) // ctx is context.Context
+	serverOne := &http.Server{ // initialize a struct
 		// ctx := context.Background()
 		// server := &http.Server{
-		Addr:    ":3333",
+		Addr:    ":" + port,
 		Handler: mux,
 		BaseContext: func(l net.Listener) context.Context {
+			ctx := context.Background() // initalize a new context
 			ctx = context.WithValue(ctx, keyServerAddr, l.Addr().String())
 			return ctx
 		},
 	}
-	serverTwo := &http.Server{ // initialize a struct
-		Addr:    ":4444",
-		Handler: mux,
-		BaseContext: func(l net.Listener) context.Context {
-			ctx = context.WithValue(ctx, keyServerAddr, l.Addr().String())
-			return ctx
-		},
+	// serverTwo := &http.Server{ // initialize a struct
+	// 	Addr:    ":4444",
+	// 	Handler: mux,
+	// 	BaseContext: func(l net.Listener) context.Context {
+	// 		ctx = context.WithValue(ctx, keyServerAddr, l.Addr().String())
+	// 		return ctx
+	// 	},
+	// }
+
+	// go func() {
+	err := serverOne.ListenAndServe() // accept zero paraemter because it's not the same function from http.
+	// start the server with ListenAndServe, the same as you have before, but this time you don’t need to provide parameters
+	// to the function like you did with http.ListenAndServe because the http.Server values have already been configured.
+	if errors.Is(err, http.ErrServerClosed) {
+		fmt.Printf("server one closed\n")
+	} else if err != nil {
+		fmt.Printf("error listenting for server one: %s\n", err)
 	}
+	// cancelCtx()
+	// }()
 
-	go func() {
-		err := serverOne.ListenAndServe() // accept zero paraemter because it's not the same function from http.
-		// start the server with ListenAndServe, the same as you have before, but this time you don’t need to provide parameters
-		// to the function like you did with http.ListenAndServe because the http.Server values have already been configured.
-		if errors.Is(err, http.ErrServerClosed) {
-			fmt.Printf("server one closed\n")
-		} else if err != nil {
-			fmt.Printf("error listenting for server one: %s\n", err)
-		}
-		cancelCtx()
-	}()
-
-	go func() {
-		err := serverTwo.ListenAndServe() // accept zero paraemter because it's not the same function from http.
-		// start the server with ListenAndServe, the same as you have before, but this time you don’t need to provide parameters
-		// to the function like you did with http.ListenAndServe because the http.Server values have already been configured.
-		if errors.Is(err, http.ErrServerClosed) {
-			fmt.Printf("server one closed\n")
-		} else if err != nil {
-			fmt.Printf("error listenting for server one: %s\n", err)
-		}
-		cancelCtx()
-	}()
+	// go func() {
+	// 	err := serverTwo.ListenAndServe() // accept zero paraemter because it's not the same function from http.
+	// 	// start the server with ListenAndServe, the same as you have before, but this time you don’t need to provide parameters
+	// 	// to the function like you did with http.ListenAndServe because the http.Server values have already been configured.
+	// 	if errors.Is(err, http.ErrServerClosed) {
+	// 		fmt.Printf("server one closed\n")
+	// 	} else if err != nil {
+	// 		fmt.Printf("error listenting for server one: %s\n", err)
+	// 	}
+	// 	cancelCtx()
+	// }()
 
 	// () are there to immediately execute the anonymous function you defined.
 	// The entire structure is a single, concise pattern used in Go to launch a function concurrently as a goroutine.
 
-	<-ctx.Done()
+	// <-ctx.Done() // IS NOT NEEDED WHEN DEPLOYED ON A SERVER SUCH AS RENDER'S BECAUSE NOTHING SENDS CLOSE SIGNAL TO <-ctx.Done()
+	// AND IT DOESN'T WAIT INDEFINITELY LIKE SIMLPLE BLOCKING CALL ListenAndServe() call does.
 
 	// Because the go func() version is non-blocking, you need a way to tell the main thread to pause and wait.
 	// This is where <-ctx.Done() comes in
