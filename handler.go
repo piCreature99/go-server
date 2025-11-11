@@ -12,6 +12,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"os"
 	"time"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -22,7 +23,9 @@ import (
 )
 
 const keyServerAddr = "serverAddr"
-const jwtSecret = "Your_super_secret_and_log_key_here" // remember to use the secret from your env file later
+
+// const jwtSecret = "Your_super_secret_and_log_key_here" // remember to use the secret from your env file later
+var jwtSecret string
 
 // -This is a map
 
@@ -470,6 +473,11 @@ func getHello(w http.ResponseWriter, r *http.Request) {
 	io.WriteString(w, fmt.Sprintf("Hello, %s!\n", myName))
 }
 func Server() {
+	jwtSecret = os.Getenv("JWT_SECRET")
+	if jwtSecret == "" {
+		fmt.Println("FATAL: JWT_SECRET is missing.")
+		os.Exit(1)
+	}
 	// custom multiplexer
 	// if you use the global router (http.DefaultServeMux), there is a high risk of name conflicts when different parts
 	// of your application or external libraries try to register handlers for the same path.
