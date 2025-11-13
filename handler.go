@@ -144,7 +144,7 @@ func LoginHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 4. Create the JWT Token (Now includes the role from MongoDB)
-	expirationTime := time.Now().Add(5 * time.Minute)
+	expirationTime := time.Now().Add(1 * time.Minute)
 
 	claims := jwt.MapClaims{
 		"user": foundUser.Username,
@@ -262,6 +262,8 @@ func AuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 
 		if err != nil || !token.Valid {
 			log.Printf("Token validation failed: %v", err)
+
+			// Send  response to react native app (status 401 Unauthorized)
 			http.Error(w, "Invalid or expired token", http.StatusUnauthorized)
 			return
 		}
@@ -272,7 +274,10 @@ func AuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 }
 
 func ProfileHandler(w http.ResponseWriter, r *http.Request) {
+	// 1. Sets the Content-Type header so the client knows the body is JSON
 	w.Header().Set("Content-Type", "application/json")
+
+	// 2. Writes the actual response body to the client (the React Native app).
 	io.WriteString(w, `{"message": "Welcome to your protected profile!}`)
 }
 
