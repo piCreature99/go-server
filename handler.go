@@ -52,7 +52,7 @@ type SQLiteRow struct {
 	Name              string `json:"name"`
 	Role              string `json:"role"`
 	Date              string `json:"date"`
-	IsSynced          bool   `json:"is_synced"`
+	IsSynced          int    `json:"is_synced"`
 	PresentState      int    `json:"present_state"`
 	ConstructionState int    `json:"construction_state"`
 	Remark            string `json:"remark"`
@@ -66,7 +66,7 @@ type SyncPayload struct {
 // 3. Final MongoDB Sub-Document for daily data
 type DailyData struct {
 	Date              string `bson:"date"`
-	IsSynced          bool   `json:"is_synced"`
+	IsSynced          int    `json:"is_synced"`
 	PresentState      int    `json:"present_state"`
 	ConstructionState int    `json:"construction_state"`
 	Remark            string `json:"remark"`
