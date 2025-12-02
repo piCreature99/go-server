@@ -672,7 +672,8 @@ func Server() {
 	mux.HandleFunc("/login", LoginHandler)
 	// NEW: Protected route using the AuthMiddleware
 	mux.HandleFunc("/profile", AuthMiddleware(ProfileHandler))
-	mux.HandleFunc("/sync/upload-data", AuthMiddleware((SyncDataHandler)))
+	// mux.HandleFunc("/sync/upload-data", AuthMiddleware(SyncDataHandler))
+	mux.HandleFunc("/sync/upload-data", SyncDataHandler)
 
 	// ctx, cancelCtx := context.WithCancel(context.Background()) // ctx is context.Context
 	serverOne := &http.Server{ // initialize a struct
