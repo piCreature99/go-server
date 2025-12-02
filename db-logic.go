@@ -16,6 +16,7 @@ var MongoClient *mongo.Client
 
 var MoviesCollection *mongo.Collection
 var UsersCollection *mongo.Collection
+var EmployeesCollection *mongo.Collection // Collection for employee data
 
 func ConnectDB() error {
 	uri := os.Getenv("MONGODB_URI")
@@ -51,6 +52,9 @@ func ConnectDB() error {
 	// coll := client.Database("sample_mflix").Collection("movies")            // access database
 	MoviesCollection = MongoClient.Database("sample_mflix").Collection("test01") // access database
 	UsersCollection = MongoClient.Database("authdb").Collection("users")
+	// Set new Employees Collection
+	EmployeesCollection = MongoClient.Database("employee_db").Collection("employees")
+
 	log.Println("Successfully connected to MongoDB and initialized collections.")
 
 	return nil

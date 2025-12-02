@@ -45,6 +45,41 @@ type UserAuth struct {
 	Role string `json:"role" bson:"role"`
 }
 
+// --- SYNCHRONIZATION STRUCTS ---
+// 1. Incoming flattened row from the React Native app
+type SQLiteRow struct {
+	EmployeeID        int    `json:"employee_id"`
+	Name              string `json:"name"`
+	Role              string `json:"role"`
+	Date              string `json:"date"`
+	IsSynced          bool   `json:"is_synced"`
+	PresentState      int    `json:"present_state"`
+	ConstructionState int    `json:"construction_state"`
+	Remark            string `json:"remark"`
+}
+
+// 2. HTTP Request Body Payload
+type SyncPayload struct {
+	Records []SQLiteRow `json:"records"`
+}
+
+// 3. Final MongoDB Sub-Document for daily data
+type DailyData struct {
+	Date              string `bson:"date"`
+	IsSynced          bool   `json:"is_synced"`
+	PresentState      int    `json:"present_state"`
+	ConstructionState int    `json:"construction_state"`
+	Remark            string `json:"remark"`
+}
+
+// 4. Final MongoDB Employee Document Structure
+type EmployeeDocument struct {
+	ID        int         `bson:"_id"` // Using _id employee_id for indexing/query efficiency
+	Name      string      `bson:"name"`
+	Role      string      `bson:"role"`
+	DailyData []DailyData `bson:"daily_data"`
+}
+
 // DELETE THIS HARDCODED MAP
 var users = map[string]string{
 	"testuser": "password123",
@@ -81,6 +116,142 @@ var admin = User{
 // fmt.Println(s1)     // Output: [B C D]
 // fmt.Println(len(s1)) // Output: 3
 // fmt.Println(cap(s1)) // Output: 5 (from 'B' to the end of myArray)
+
+// --- TRANSFORMATION UTILITY FUNCTION ---
+
+// TransformData groups flat SQLiteRow data into the nested EmployeeDocument structure
+func transformData(rows []SQLiteRow) []EmployeeDocument {
+	// Map to hold EmployeeDocument pointers, keyed by EmployeeID
+	employeeMap := make(map[int]*EmployeeDocument)
+	// new concept: employeeMap return a copy, modifying it directly is useless, that's why you have to use pointer *EmployeeDocument
+	// ex: employeeMap[row.EmployeeID].Name = "New Name" // error the map element is unaddressable, to modify without pointers:
+	// 1. Get the current copy from the map
+	// doc := employeeMap[row.EmployeeID]
+
+	// // 2. Modify the copy (append data to the slice inside the copy)
+	// doc.DailyData = append(doc.DailyData, dailyEntry)
+
+	// // 3. Reassign the updated copy back into the map
+	// employeeMap[row.EmployeeID] = doc // <-- REQUIRED STEP!
+	for _, row := range rows {
+		// 1. Initialize EmployeeDocument if not already in the map
+		if _, ok := employeeMap[row.EmployeeID]; !ok { // ensures that you only create a new EmployeeDocument once per employee,
+			// even if that employee has multiple daily records in the input slice.
+			// if !ok, which mean not ok is false, creates the new EmployeeDocument and initializing base data (ID, Name, Role)
+			// and the empty daily data slice
+			employeeMap[row.EmployeeID] = &EmployeeDocument{ // use struct to assign data to a map
+				ID:        row.EmployeeID,
+				Name:      row.Name,
+				Role:      row.Role,
+				DailyData: make([]DailyData, 0), // Initialize the slice (array but better)
+			}
+		}
+
+		// 2. Create the nested DailyData sub-document
+		dailyEntry := DailyData{
+			Date:              row.Date,
+			IsSynced:          row.IsSynced,
+			PresentState:      row.PresentState,
+			ConstructionState: row.ConstructionState,
+			Remark:            row.Remark,
+		}
+
+		// 3. Append the daily data to the employee's DailyData slice
+		employeeMap[row.EmployeeID].DailyData = append(employeeMap[row.EmployeeID].DailyData, dailyEntry) // return a slice
+		// employeeMap[row.EmployeeID] is a pointer to a struct, accessing data in this struct automatically dereference it,
+		// assigning data directly modify the original struct's data, without the need of reassignment.
+	}
+
+	// 4. Convert map values back into a slice for BulkWrite
+	// using map to check for duplicate id is faster and more efficient than slice
+	var documents []EmployeeDocument
+	for _, doc := range employeeMap {
+		// *doc is a dereference
+		documents = append(documents, *doc)
+	}
+	return documents
+}
+
+// --- SYNCHRONIZATION HANDLER ---
+func SyncDataHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// 1. Decode the JSON payload
+	var payload SyncPayload
+	// NewDecoder reads the body and Decode for assigning data into the struct
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil { // pass in a pointer to the struct to modify its data directly
+		log.Printf("Sync decode error: %v", err)
+		http.Error(w, "Invalid request payload", http.StatusBadRequest)
+		return
+	}
+
+	if len(payload.Records) == 0 {
+		w.WriteHeader(http.StatusOK) // Sets the HTTP Status code and triggers header transmission
+		// w represents the http.ResponseWriter interface. This interface is what your Go HTTP handler uses to build and send the response back to the client
+		// the web browser or API consumer (w is write the response data and headers, r is for reading the incoming request data)
+		// The general pattern:
+		// 1. Set Headers First: Use w.Header().Set("Content-Type", "application/json") to set any custom headers.
+		// 2. Set Status: Call w.WriteHeader(status) to finalize the headers and status line.
+		// 3. Write Body Last: Use w.Write() or a JSON encoder (json.NewEncoder(w).Encode()) to send the actual data
+		json.NewEncoder(w).Encode(map[string]string{
+			"message": "No records provied to sync.",
+		})
+		return
+	}
+
+	// 2. Transform: Group the flat rows by Employee ID
+	employeeDocuments := transformData(payload.Records)
+
+	// 3. Load: Perform Bulk Upsert to MongoDB Atlas
+	if EmployeesCollection == nil {
+		log.Println("MongoDB EmployeesCollection not initialized.")
+		http.Error(w, "Server configuration error", http.StatusInternalServerError)
+		return
+	}
+
+	// Create a request context with a timeout
+
+	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+	defer cancel()
+
+	var writes []mongo.WriteModel // interface. Represents a single atomic operation to be executed as part of a bulk write operation.
+	// Serves as a generic container that allows you to mix different types of write operations (like, inserts, upates, and replacements)
+	// into a single batch request to the MongoDB server.
+	for _, doc := range employeeDocuments {
+		// The upsert strategy here is to REPLACE the entire document with the new one.
+		// This is simple but means the client must send ALL data for that employee ID.
+		// For daily logs, a more advanced approach (using $addToSet or $push) might be needed
+		// but for a full sync, ReplaceOne is fine.
+		model := mongo.NewReplaceOneModel().
+			SetFilter(bson.D{{Key: "_id", Value: doc.ID}}).
+			SetReplacement(doc).
+			SetUpsert(true) // Crucial: Insert if the document does not exist
+		writes = append(writes, model)
+		// this is basically insert and prevent duplication
+	}
+
+	// Perform the bulk operation
+	result, err := EmployeesCollection.BulkWrite(ctx, writes)
+	if err != nil {
+		log.Printf("MongoDB Bulk Write Failed: %v", err)
+		http.Error(w, "Failed to sync data to cloud database", http.StatusInternalServerError)
+		return
+	}
+
+	// 4. Success Response
+	log.Printf("Sync successful: Inserted/Updated %d documents.", result.UpsertedCount)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{
+		"message":       fmt.Sprintf("Sync complete. Total upserted/matched: %d", result.UpsertedCount+result.ModifiedCount),
+		"upsertedCount": fmt.Sprintf("%d", result.UpsertedCount),
+		"modifiedCount": fmt.Sprintf("%d", result.ModifiedCount),
+	})
+}
 
 // LOGIN HANDLER
 func LoginHandler(w http.ResponseWriter, r *http.Request) {
@@ -144,7 +315,7 @@ func LoginHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 4. Create the JWT Token (Now includes the role from MongoDB)
-	expirationTime := time.Now().Add(1 * time.Minute)
+	expirationTime := time.Now().Add(120 * time.Minute)
 
 	claims := jwt.MapClaims{
 		"user": foundUser.Username,
@@ -172,7 +343,7 @@ func LoginHandler(w http.ResponseWriter, r *http.Request) {
 	// }
 
 	// Create the token instance
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims) // this step let the server know about user role and exp time to validate returned tokens
 	// creating a new, unsigned JSON Web Token (JWT) object.
 	// SigningMethodHS256 is a constant representing the HMAC using SHA-256 algorithm.
 	// It tells the recipient (the server) how the token was signed, so they know which method to use for verification.
@@ -501,6 +672,7 @@ func Server() {
 	mux.HandleFunc("/login", LoginHandler)
 	// NEW: Protected route using the AuthMiddleware
 	mux.HandleFunc("/profile", AuthMiddleware(ProfileHandler))
+	mux.HandleFunc("/sync/upload-data", AuthMiddleware((SyncDataHandler)))
 
 	// ctx, cancelCtx := context.WithCancel(context.Background()) // ctx is context.Context
 	serverOne := &http.Server{ // initialize a struct
