@@ -172,6 +172,82 @@ func transformData(rows []SQLiteRow) []EmployeeDocument {
 	return documents
 }
 
+// --- DOWNLOAD HANDLER ---
+
+func DownloadDataHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "GET" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if EmployeesCollection == nil {
+		log.Println("MongoDB EmployeesCollection not initalized.")
+		http.Error(w, "Server configuration error", http.StatusInternalServerError)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+
+	// 1. Query MongoDB to find ALL employee documents
+	filter := bson.D{} // Empty filter matches all documents
+
+	// Find all documents
+	cursor, err := EmployeesCollection.Find(ctx, filter)
+	if err != nil {
+		log.Printf("MongoDB Find error: %v", err)
+		http.Error(w, "Internal server error during cloud query", http.StatusInternalServerError)
+		return
+	}
+
+	defer cursor.Close(ctx) // Ensure the cursor is closed
+
+	// 2. Decode all documents into a slice
+	var employees []EmployeeDocument                   // EmployeeDocument is the struct you defined for MongoDB
+	if err = cursor.All(ctx, &employees); err != nil { // write the result back to the memory location of the employee slice variable
+		// for each document, it creates a new EmployeeDocument struct and appends it to the slice pointed to by &employee.
+		log.Printf("MongoDB Cursor decoding error: %v", err)
+		http.Error(w, "Internal server error during data processing", http.StatusInternalServerError)
+		return
+	}
+
+	// 3. Send the JSON resposne
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+
+	// Send the array of employee documents inside a wrapping object
+	response := map[string]interface{}{
+		"employees": employees,
+		"message":   fmt.Sprintf("Retrieved %d employee documents from cloud.", len(employees)),
+	}
+	// returns structure similar to this:
+	// {
+	// "employees": [
+	//     {
+	//         "ID": 1,
+	//         "Name": "John Doe",
+	//         "Role": "Engineer",
+	//         "DailyData": [
+	//             { "Date": "2025-12-01", "IsSynced": 1, ... }
+	//         ]
+	//     },
+	//     {
+	//         "ID": 2,
+	//         "Name": "Jane Smith",
+	//         "Role": "Manager",
+	//         "DailyData": [
+	//             { "Date": "2025-12-01", "IsSynced": 1, ... }
+	//         ]
+	//     }
+	// ],
+	// "message": "Retrieved 2 employee documents from cloud."
+	// }
+
+	if err := json.NewEncoder(w).Encode(response); err != nil { // encodes into a json string and send it back to your application
+		log.Printf("Error encoding JSON response: %v", err)
+	}
+}
+
 // --- SYNCHRONIZATION HANDLER ---
 func SyncDataHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "POST" {
@@ -674,6 +750,7 @@ func Server() {
 	mux.HandleFunc("/profile", AuthMiddleware(ProfileHandler))
 	// mux.HandleFunc("/sync/upload-data", AuthMiddleware(SyncDataHandler))
 	mux.HandleFunc("/sync/upload-data", SyncDataHandler)
+	mux.HandleFunc("/sync/download-data", DownloadDataHandler)
 
 	// ctx, cancelCtx := context.WithCancel(context.Background()) // ctx is context.Context
 	serverOne := &http.Server{ // initialize a struct
