@@ -65,7 +65,7 @@ type SyncPayload struct {
 
 // 3. Final MongoDB Sub-Document for daily data
 type DailyData struct {
-	Date              string `bson:"date"`
+	Date              string `bson:"date" json:"date"`
 	IsSynced          int    `json:"is_synced"`
 	PresentState      int    `json:"present_state"`
 	ConstructionState int    `json:"construction_state"`
@@ -74,10 +74,10 @@ type DailyData struct {
 
 // 4. Final MongoDB Employee Document Structure
 type EmployeeDocument struct {
-	ID        int         `bson:"_id"` // Using _id employee_id for indexing/query efficiency
-	Name      string      `bson:"name"`
-	Role      string      `bson:"role"`
-	DailyData []DailyData `bson:"daily_data"`
+	ID        int         `bson:"_id" json:"_id"`   // Using _id employee_id for indexing/query efficiency
+	Name      string      `bson:"name" json:"name"` // adding json tag help with field names from response returned to your app
+	Role      string      `bson:"role" json:"role"`
+	DailyData []DailyData `bson:"daily_data" json:"daily_data"`
 }
 
 // DELETE THIS HARDCODED MAP
