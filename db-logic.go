@@ -2,11 +2,13 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
 	"time"
 
+	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
@@ -17,6 +19,41 @@ var MongoClient *mongo.Client
 var MoviesCollection *mongo.Collection
 var UsersCollection *mongo.Collection
 var EmployeesCollection *mongo.Collection // Collection for employee data
+func BulkDeleteEmployee(ctx context.Context, employeeIDs []int) (int64, error) {
+	if EmployeesCollection == nil {
+		return 0, errors.New("employees collection or initialized")
+	}
+
+	// Filter uses MongoDB $in operator: { "_id": {"$in": [101, 102, 103]}}
+	filter := bson.M{"_id": bson.M{"$in": employeeIDs}}
+
+	// Execute the deletion against the global EmployeesCollection
+	result, err := EmployeesCollection.DeleteMany(ctx, filter)
+	if err != nil {
+		return 0, fmt.Errorf("failed to delete employee %d: %w", employeeIDs, err)
+	}
+
+	// Returns the count of deleted documents (0 or 1)
+	return result.DeletedCount, nil
+}
+
+func DeleteEmployee(ctx context.Context, employeeID int) (int64, error) {
+	if EmployeesCollection == nil {
+		return 0, errors.New("employees collection or initialized")
+	}
+
+	// Filter to select the document by its _id field
+	filter := bson.M{"_id": employeeID}
+
+	// Execute the deletion against the global EmployeesCollection
+	result, err := EmployeesCollection.DeleteOne(ctx, filter)
+	if err != nil {
+		return 0, fmt.Errorf("failed to delete employee %d: %w", employeeID, err)
+	}
+
+	// Returns the count of deleted documents (0 or 1)
+	return result.DeletedCount, nil
+}
 
 func ConnectDB() error {
 	uri := os.Getenv("MONGODB_URI")

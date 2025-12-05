@@ -13,6 +13,8 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -170,6 +172,80 @@ func transformData(rows []SQLiteRow) []EmployeeDocument {
 		documents = append(documents, *doc)
 	}
 	return documents
+}
+
+// --- DELETE HANDLER ---
+func deleteEmployeeHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete { // use delete method isntad of post because it correctly expresses the intent of your action and adheres
+		// to established web standards, use the constant provided for less error prone
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// 1. Get the MongoDB context and collection (assuming these are globally evaiable)
+	// NOTE: You must replace 'mongoClient' and 'employeeCollection' with your actual variable names.
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+
+	// Assuming your collection variable is named 'employeesCollection;
+	// collection := mongoClient.Database("your_database_name").Collection("employees")
+
+	// 2. Extract the Employee ID from the URL path.
+	// Assuming the URL format is /sync/employee/{id}
+	// You'll need to update your router to handle this path variable.
+	pathSegments := strings.Split(r.URL.Path, "/") // use use r.URL.Path instead of decoding the body because body is used for data creation and modification
+	// not for deletion which is sent through the endpoint instead
+
+	// Use the last non-empty segment, which should be the ID
+	employeeIDsStr := pathSegments[len(pathSegments)-1] // this check for the last segment in the array
+
+	// Input validation: ensure the ID segment exists
+	if employeeIDsStr == "employee" || employeeIDsStr == "" {
+		http.Error(w, "Missing employee ID in path (Expected /sync/employee/{id})", http.StatusBadRequest)
+		return
+	}
+	// Split the comma-separated string into a slice of ID strings
+	idStrings := strings.Split(employeeIDsStr, ",")
+
+	// Convert the slice of strings to a slice of integers
+	var employeeIDs []int // The slice to hold the final integer IDs
+	for _, strID := range idStrings {
+		// Trim whitespace for safety
+		strID = strings.TrimSpace(strID)
+
+		//Convert to integer
+		intID, err := strconv.Atoi(strID)
+		if err != nil {
+			log.Printf("Invalid employee ID format received: %s in list %s", strID, employeeIDsStr)
+			http.Error(w, "Invalid employee ID format in list", http.StatusBadRequest)
+			return
+		}
+		employeeIDs = append(employeeIDs, intID)
+	}
+	// Input validation: ensure we have at least one ID
+	if len(employeeIDs) == 0 {
+		http.Error(w, "No valid emloyee IDs provided", http.StatusBadRequest)
+		return
+	}
+
+	// 2. Call the bulk database logic function
+	deletedCount, err := BulkDeleteEmployee(ctx, employeeIDs)
+
+	if err != nil {
+		log.Printf("MongoDB bulk deletion failed for ID %d: %v", employeeIDs, err)
+		http.Error(w, "Failed to delete employees from cloud database", http.StatusInternalServerError)
+		return
+	}
+
+	// 3. Optional Logging/Error handling for not found
+	if deletedCount == 0 {
+		// If the client requested deletion and it wasn't found, the client's goal
+		// (to have the employee gone) is still achieved. We return 204.
+		log.Printf("Employee ID %d not found in cloud database, but returning success.", employeeIDs)
+
+		// 4. Send success response (204 No Content is standard for successful deletions)
+		w.WriteHeader(http.StatusNoContent)
+	}
 }
 
 // --- DOWNLOAD HANDLER ---
@@ -751,6 +827,7 @@ func Server() {
 	// mux.HandleFunc("/sync/upload-data", AuthMiddleware(SyncDataHandler))
 	mux.HandleFunc("/sync/upload-data", SyncDataHandler)
 	mux.HandleFunc("/sync/download-data", DownloadDataHandler)
+	mux.HandleFunc("/sync/employee/{id}", deleteEmployeeHandler)
 
 	// ctx, cancelCtx := context.WithCancel(context.Background()) // ctx is context.Context
 	serverOne := &http.Server{ // initialize a struct
