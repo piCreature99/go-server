@@ -5,7 +5,21 @@ import (
 	"fmt"
 	"log"
 	"time"
+
+	"google.golang.org/api/drive/v3"
+	"google.golang.org/api/option"
 )
+
+func InitDriveService() {
+	ctx := context.Background()
+	// Ensure you have 'credentials.json' in your root folder
+	srv, err := drive.NewService(ctx, option.WithCredentialsFile("credentials.json"))
+	if err != nil {
+		log.Fatalf("Unable to retrieve Drive client: %v", err)
+	}
+	DriveService = srv
+	log.Println("Google Drive Service Initalized")
+}
 
 func main() {
 
