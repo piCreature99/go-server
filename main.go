@@ -23,6 +23,7 @@ func InitDriveService() {
 
 func main() {
 
+	InitDriveService()
 	// 1. CONNECT TO DATABASE FIRST
 	// ConnectDB initializes the global MongoClient and MoviesCollection
 	fmt.Printf("Starting application...\n")
