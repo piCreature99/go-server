@@ -182,10 +182,12 @@ func UploadImageHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 3. Prepare Drive File Metadata
+	// Define your folder ID here.
+	TARGET_FOLDER_ID := os.Getenv("FOLDER_ID")
 	f := &drive.File{
 		Name: req.Filename,
 		// Optional: Specify a folder ID to save into specific folder
-		// Parents: []string{"YOUR_FOLDER_ID_HERE"},
+		Parents: []string{TARGET_FOLDER_ID},
 	}
 
 	// 4. Upload to Google Drive
