@@ -17,14 +17,15 @@ import (
 	"strings"
 	"time"
 
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 
 	"github.com/golang-jwt/jwt/v5"
 	// "os"
 
-	"bytes"
-	"encoding/base64"
+	// "bytes"
+	// "encoding/base64"
 
 	// Google Drive Imports
 	"google.golang.org/api/drive/v3"
@@ -35,21 +36,30 @@ const keyServerAddr = "serverAddr"
 // const jwtSecret = "Your_super_secret_and_log_key_here" // remember to use the secret from your env file later
 var jwtSecret string
 
+// MongoDB Document for Images
+// Note: Storing Base 64 directly is simple but limited to 16MB per image.
+type ImageRecord struct {
+	ID          primitive.ObjectID `bson:"_id,omitempty"` // MongoB unique ID
+	EmployeeID  string             `bson:"employee_id"`
+	Filename    string             `bson:"filename"`
+	ImageBase64 string             `bson:"image_base64"` // THE IMAGE DATA
+	CreatedAt   time.Time          `bson:"created_at"`
+}
+
 // Global Drive Service variable (initialize this in main.go)
 var DriveService *drive.Service
 
 // 1. Request Payload (Matches your React Native JSON)
 type UploadRequest struct {
-	Filename   string `json:"filename"`
-	Image      string `json:"image"` // Base 64 string
-	EmployeeID string `json:"employeeId"`
+	EmployeeID  string `json:"employeeId"`
+	Filename    string `json:"filename"`
+	ImageBase64 string `json:"imageBase64"` // Base 64 string
 }
 
 // 2. Response Payload
 type UploadResponse struct {
-	Success   bool   `json:"success"`
-	DriveLink string `json:"driveLink"`
-	FileID    string `json:"fileId"`
+	Success bool   `json:"success"`
+	FileID  string `json:"fileId"`
 }
 
 // 3. MongoDB Document for Image (Optional: if you want to save metadata to DB)
@@ -151,6 +161,12 @@ var admin = User{
 // fmt.Println(len(s1)) // Output: 3
 // fmt.Println(cap(s1)) // Output: 5 (from 'B' to the end of myArray)
 
+// --- GET IMAGE HANDLER ---
+
+func GetImageHandler(w http.ResponseWriter, r *http.Request) {
+
+}
+
 // --- UPLOAD IMAGE HANDLER ---
 
 func UploadImageHandler(w http.ResponseWriter, r *http.Request) {
@@ -169,67 +185,99 @@ func UploadImageHandler(w http.ResponseWriter, r *http.Request) {
 	// 2. Decode Base64 Image String
 	// React Native's readAsStringAsync usually returns raw Base 64.
 	// If it has a prefix (data:image/jpeg;base64,), we must strip it.
-	base64Data := req.Image
+	base64Data := req.ImageBase64
 	if idx := strings.Index(base64Data, ","); idx != -1 {
 		base64Data = base64Data[idx+1:]
 	}
 
-	imageBytes, err := base64.StdEncoding.DecodeString(base64Data)
-	if err != nil {
-		log.Printf("Base64 decode error: %v", err)
-		http.Error(w, "Failed to decode image data", http.StatusBadRequest)
+	// 3. Validation Check
+	if req.EmployeeID == "" || req.Filename == "" || base64Data == "" {
+		http.Error(w, "Missing employee ID, filename, or image data", http.StatusBadRequest)
 		return
 	}
 
-	// 3. Prepare Drive File Metadata
-	// Define your folder ID here.
-	TARGET_FOLDER_ID := os.Getenv("FOLDER_ID")
-	log.Printf("DEBUG: FOLDER_ID retrieved is: [%s]", TARGET_FOLDER_ID)
-	f := &drive.File{
-		Name: req.Filename,
-		// Optional: Specify a folder ID to save into specific folder
-		Parents: []string{TARGET_FOLDER_ID},
+	// 4. Prepare the document with the clean Base64 string
+	newImage := ImageRecord{
+		EmployeeID:  req.EmployeeID,
+		Filename:    req.Filename,
+		ImageBase64: base64Data,
+		CreatedAt:   time.Now(),
 	}
 
-	// 4. Upload to Google Drive
-	// We convert the byte slice into a Reader for the Drive API
-	res, err := DriveService.Files.Create(f).Media(bytes.NewReader(imageBytes)).Do()
+	// 5. Insert into MongoDB
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	insertResult, err := ImagesCollection.InsertOne(ctx, newImage)
 	if err != nil {
-		log.Printf("Drive Upload Error: %v", err)
-		http.Error(w, "Failed to upload to Google Drive", http.StatusInternalServerError)
+		log.Printf("MongoDB Insert Error: %v", err)
+		http.Error(w, "Failed to save image record to database.", http.StatusInternalServerError)
 		return
 	}
 
-	// 5. Make the File Public (Optional but recommended for easy downloading)
-	// This allows anyone with the link to download it, which simplifies your Sync Down logic
-
-	permission := &drive.Permission{
-		Type: "anyone",
-		Role: "reader",
-	}
-
-	_, err = DriveService.Permissions.Create(res.Id, permission).Do()
-	if err != nil {
-		log.Printf("Permission Error: %v", err)
-		// We continue even if permission fails, but log it
-	}
-
-	// 6. Get the WebContentLink (Direct Download Link)
-	// We need to fetch the file again to get specific fields like WebContentLink
-	fileInfo, err := DriveService.Files.Get(res.Id).Fields("webContentLink", "webViewLink").Do()
-	if err != nil {
-		log.Printf("Failed to get file link: %v", err)
-		http.Error(w, "Failed to retrieve link", http.StatusInternalServerError)
-		return
-	}
-
-	// 8. Return Success Response
+	// 6. Return Success Response
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(UploadResponse{
-		Success:   true,
-		DriveLink: fileInfo.WebContentLink, // This link is used for direct downloads
-		FileID:    res.Id,
+		Success: true,
+		FileID:  insertResult.InsertedID.(primitive.ObjectID).Hex(),
 	})
+
+	// imageBytes, err := base64.StdEncoding.DecodeString(base64Data)
+	// if err != nil {
+	// 	log.Printf("Base64 decode error: %v", err)
+	// 	http.Error(w, "Failed to decode image data", http.StatusBadRequest)
+	// 	return
+	// }
+
+	// // 3. Prepare Drive File Metadata
+	// // Define your folder ID here.
+	// TARGET_FOLDER_ID := os.Getenv("FOLDER_ID")
+	// log.Printf("DEBUG: FOLDER_ID retrieved is: [%s]", TARGET_FOLDER_ID)
+	// f := &drive.File{
+	// 	Name: req.Filename,
+	// 	// Optional: Specify a folder ID to save into specific folder
+	// 	Parents: []string{TARGET_FOLDER_ID},
+	// }
+
+	// // 4. Upload to Google Drive
+	// // We convert the byte slice into a Reader for the Drive API
+	// res, err := DriveService.Files.Create(f).Media(bytes.NewReader(imageBytes)).Do()
+	// if err != nil {
+	// 	log.Printf("Drive Upload Error: %v", err)
+	// 	http.Error(w, "Failed to upload to Google Drive", http.StatusInternalServerError)
+	// 	return
+	// }
+
+	// // 5. Make the File Public (Optional but recommended for easy downloading)
+	// // This allows anyone with the link to download it, which simplifies your Sync Down logic
+
+	// permission := &drive.Permission{
+	// 	Type: "anyone",
+	// 	Role: "reader",
+	// }
+
+	// _, err = DriveService.Permissions.Create(res.Id, permission).Do()
+	// if err != nil {
+	// 	log.Printf("Permission Error: %v", err)
+	// 	// We continue even if permission fails, but log it
+	// }
+
+	// // 6. Get the WebContentLink (Direct Download Link)
+	// // We need to fetch the file again to get specific fields like WebContentLink
+	// fileInfo, err := DriveService.Files.Get(res.Id).Fields("webContentLink", "webViewLink").Do()
+	// if err != nil {
+	// 	log.Printf("Failed to get file link: %v", err)
+	// 	http.Error(w, "Failed to retrieve link", http.StatusInternalServerError)
+	// 	return
+	// }
+
+	// // 8. Return Success Response
+	// w.Header().Set("Content-Type", "application/json")
+	// json.NewEncoder(w).Encode(UploadResponse{
+	// 	Success:   true,
+	// 	DriveLink: fileInfo.WebContentLink, // This link is used for direct downloads
+	// 	FileID:    res.Id,
+	// })
 }
 
 // --- TRANSFORMATION UTILITY FUNCTION ---
@@ -942,6 +990,7 @@ func Server() {
 	mux.HandleFunc("/sync/download-data", DownloadDataHandler)
 	mux.HandleFunc("/sync/employee/{id}", deleteEmployeeHandler)
 	mux.HandleFunc("/api/upload", UploadImageHandler)
+	mux.HandleFunc("/api/get", GetImageHandler)
 
 	// ctx, cancelCtx := context.WithCancel(context.Background()) // ctx is context.Context
 	serverOne := &http.Server{ // initialize a struct

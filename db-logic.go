@@ -16,6 +16,7 @@ import (
 // Declared as an exported (capitalized) global variable.
 var MongoClient *mongo.Client
 
+var ImagesCollection *mongo.Collection
 var MoviesCollection *mongo.Collection
 var UsersCollection *mongo.Collection
 var EmployeesCollection *mongo.Collection // Collection for employee data
@@ -91,7 +92,7 @@ func ConnectDB() error {
 	UsersCollection = MongoClient.Database("authdb").Collection("users")
 	// Set new Employees Collection
 	EmployeesCollection = MongoClient.Database("employee_db").Collection("employees")
-
+	ImagesCollection = MongoClient.Database("employee_db").Collection("images")
 	log.Println("Successfully connected to MongoDB and initialized collections.")
 
 	return nil
