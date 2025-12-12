@@ -216,10 +216,25 @@ func UploadImageHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 6. Return Success Response
+	// The InsertedID is returned as the underlying bson.ObjectID type (not the V1 path's preimitive.ObjectID)
+	// The driver returns it as interface{}. The safest cast is to the concrete type it returned.
+
+	// var insertedID string
+	// if objectID, ok := insertResult.InsertedID.(primitive.ObjectID); ok{
+	// 	// Safe to case to primitive.ObjectID (if the driver happens to resolve it this way)
+	// 	insertedID = objectID.Hex()
+	// } else if objectID, ok := insertResult.InsertedID.(bson.ObjectID); ok {
+	// 	// Safe cast to bson.ObjectID (if the driver happens to solve it this way)
+	// 	insertedID = objectID.Hex()
+	// } else {
+	// 	// Fallback for an unknown type (shouldn't happen)
+	// 	log.Printf("Warning: InsertedID is not an ObjectID type: %T", insertResult.InsertedID)
+	// 	insertedID = "" // Or use fmt.Sprint("%v", insertResult.InsertedID)
+	// }
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(UploadResponse{
 		Success: true,
-		FileID:  insertResult.InsertedID.(primitive.ObjectID).Hex(),
+		FileID:  insertResult.InsertedID.(bson.ObjectID).Hex(), // Use bson.ObjectID for the cast
 	})
 
 	// imageBytes, err := base64.StdEncoding.DecodeString(base64Data)
