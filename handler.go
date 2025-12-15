@@ -168,6 +168,41 @@ func GetImageHandler(w http.ResponseWriter, r *http.Request) {
 
 }
 
+func DownloadImagesHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// 1. Decode IDs we want to download
+	var ids []string
+	if err := json.NewDecoder(r.Body).Decode(&ids); err != nil {
+		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		return
+	}
+
+	// 2. Query MongoDB for these IDs
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	filter := bson.M{"employee_id": bson.M{"$in": ids}}
+	cursor, err := ImagesCollection.Find(ctx, filter) // return multiple document if the id matches
+	if err != nil {
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
+	}
+
+	var results []ImageRecord
+	if err = cursor.All(ctx, &results); err != nil {
+		http.Error(w, "Decoding error", http.StatusInternalServerError)
+		return
+	}
+
+	// 3. Send back the array of image data
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(results)
+}
+
 // --- UPLOAD IMAGE HANDLER ---
 
 func UploadImageHandler(w http.ResponseWriter, r *http.Request) {
@@ -1030,7 +1065,7 @@ func Server() {
 	mux.HandleFunc("/sync/download-data", DownloadDataHandler)
 	mux.HandleFunc("/sync/employee/{id}", deleteEmployeeHandler)
 	mux.HandleFunc("/api/upload", UploadImageHandler)
-	mux.HandleFunc("/api/get", GetImageHandler)
+	mux.HandleFunc("/api/get", DownloadImagesHandler)
 
 	// ctx, cancelCtx := context.WithCancel(context.Background()) // ctx is context.Context
 	serverOne := &http.Server{ // initialize a struct
