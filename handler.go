@@ -20,6 +20,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 
 	"github.com/golang-jwt/jwt/v5"
 	// "os"
@@ -176,44 +177,67 @@ func UploadImageHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 1. Decode JSON Body
-	var req UploadRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid JSON body", http.StatusBadRequest)
+	var reqs []UploadRequest
+	if err := json.NewDecoder(r.Body).Decode(&reqs); err != nil {
+		http.Error(w, "Invalid JSON body (expected array)", http.StatusBadRequest)
 		return
 	}
 
-	// 2. Decode Base64 Image String
-	// React Native's readAsStringAsync usually returns raw Base 64.
-	// If it has a prefix (data:image/jpeg;base64,), we must strip it.
-	base64Data := req.ImageBase64
-	if idx := strings.Index(base64Data, ","); idx != -1 {
-		base64Data = base64Data[idx+1:]
-	}
-
-	// 3. Validation Check
-	if req.EmployeeID == "" || req.Filename == "" || base64Data == "" {
-		http.Error(w, "Missing employee ID, filename, or image data", http.StatusBadRequest)
-		return
-	}
-
-	// 4. Prepare the document with the clean Base64 string
-	newImage := ImageRecord{
-		EmployeeID:  req.EmployeeID,
-		Filename:    req.Filename,
-		ImageBase64: base64Data,
-		CreatedAt:   time.Now(),
-	}
-
-	// 5. Insert into MongoDB
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	insertResult, err := ImagesCollection.InsertOne(ctx, newImage)
-	if err != nil {
-		log.Printf("MongoDB Insert Error: %v", err)
-		http.Error(w, "Failed to save image record to database.", http.StatusInternalServerError)
-		return
+	var processedIDs []string
+
+	// 2. Loop through each image request
+	for _, item := range reqs {
+		// Strip base 64 prefix if exists
+		base64Data := item.ImageBase64
+		if idx := strings.Index(base64Data, ","); idx != -1 { // returns the index of comma, usually, images are send with a path like this:
+			// data:image/jpeg;base64,/9j/4AAQSk...
+			base64Data = base64Data[idx+1:]
+		}
+
+		// Basic validation
+		if item.EmployeeID == "" || base64Data == "" {
+			log.Printf("Skipping invalid record for EmployeeID: %s", item.EmployeeID)
+			continue
+		}
+
+		// 3. Define the Filter (Find by EmployeeID)
+		filter := bson.M{"employee_id": item.EmployeeID}
+
+		// 4. Define the Update (Set new data)
+		update := bson.M{
+			"$set": bson.M{ // $set perform replacement if employee_id already exists
+				"filename":     item.Filename,
+				"image_base64": base64Data,
+				"updated_at":   time.Now(),
+			},
+			"$setOnInsert": bson.M{ // subsequent updates won't overwrite the original creation date
+				"created_at": time.Now(),
+			},
+		}
+
+		// 5. Execute Upsert
+		opts := options.UpdateOne().SetUpsert(true)
+		_, err := ImagesCollection.UpdateOne(ctx, filter, update, opts)
+
+		if err != nil {
+			log.Printf("Upsert failed for %s: %v", item.EmployeeID, err)
+			continue
+		}
+
+		processedIDs = append(processedIDs, item.EmployeeID)
 	}
+
+	// 6. Return Success Resposne
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":       true,
+		"message":       "Bulk upsert completed",
+		"Processed_ids": processedIDs,
+		"count":         len(processedIDs),
+	})
 
 	// 6. Return Success Response
 	// The InsertedID is returned as the underlying bson.ObjectID type (not the V1 path's preimitive.ObjectID)
@@ -231,11 +255,12 @@ func UploadImageHandler(w http.ResponseWriter, r *http.Request) {
 	// 	log.Printf("Warning: InsertedID is not an ObjectID type: %T", insertResult.InsertedID)
 	// 	insertedID = "" // Or use fmt.Sprint("%v", insertResult.InsertedID)
 	// }
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(UploadResponse{
-		Success: true,
-		FileID:  insertResult.InsertedID.(bson.ObjectID).Hex(), // Use bson.ObjectID for the cast
-	})
+
+	// w.Header().Set("Content-Type", "application/json")
+	// json.NewEncoder(w).Encode(UploadResponse{
+	// 	Success: true,
+	// 	FileID:  insertResult.InsertedID.(bson.ObjectID).Hex(), // Use bson.ObjectID for the cast
+	// })
 
 	// imageBytes, err := base64.StdEncoding.DecodeString(base64Data)
 	// if err != nil {
