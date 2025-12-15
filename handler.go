@@ -17,7 +17,6 @@ import (
 	"strings"
 	"time"
 
-	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
@@ -40,11 +39,12 @@ var jwtSecret string
 // MongoDB Document for Images
 // Note: Storing Base 64 directly is simple but limited to 16MB per image.
 type ImageRecord struct {
-	ID          primitive.ObjectID `bson:"_id,omitempty"` // MongoB unique ID
-	EmployeeID  string             `bson:"employee_id"`
-	Filename    string             `bson:"filename"`
-	ImageBase64 string             `bson:"image_base64"` // THE IMAGE DATA
-	CreatedAt   time.Time          `bson:"created_at"`
+	ID          any       `bson:"_id" json:"-"` // MongoB unique ID
+	EmployeeID  string    `bson:"employee_id" json:"employeeId"`
+	Filename    string    `bson:"filename" json:"filename"`
+	ImageBase64 string    `bson:"image_base64" json:"base64Data"` // THE IMAGE DATA
+	CreatedAt   time.Time `bson:"created_at" json:"created_at"`
+	UpdatedAt   time.Time `bson:"updated_at" json:"updated_at"`
 }
 
 // Global Drive Service variable (initialize this in main.go)
