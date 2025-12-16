@@ -418,7 +418,7 @@ func deleteEmployeeHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 1. Get the MongoDB context and collection (assuming these are globally evaiable)
+	// 1. Get the MongoDB context and collection (assuming these are globally available)
 	// NOTE: You must replace 'mongoClient' and 'employeeCollection' with your actual variable names.
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
@@ -467,6 +467,9 @@ func deleteEmployeeHandler(w http.ResponseWriter, r *http.Request) {
 	// 2. Call the bulk database logic function
 	deletedCount, err := BulkDeleteEmployee(ctx, employeeIDs)
 
+	// Delete Associated Images (requires String IDs)
+	deletedImageCount, err := BulkDeleteImages(ctx, idStrings)
+
 	if err != nil {
 		log.Printf("MongoDB bulk deletion failed for ID %d: %v", employeeIDs, err)
 		http.Error(w, "Failed to delete employees from cloud database", http.StatusInternalServerError)
@@ -482,6 +485,9 @@ func deleteEmployeeHandler(w http.ResponseWriter, r *http.Request) {
 		// 4. Send success response (204 No Content is standard for successful deletions)
 		w.WriteHeader(http.StatusNoContent)
 	}
+
+	log.Printf("Deleted %d employees and %d images.", deletedCount, deletedImageCount)
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // --- DOWNLOAD HANDLER ---

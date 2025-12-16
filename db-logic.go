@@ -20,6 +20,20 @@ var ImagesCollection *mongo.Collection
 var MoviesCollection *mongo.Collection
 var UsersCollection *mongo.Collection
 var EmployeesCollection *mongo.Collection // Collection for employee data
+
+func BulkDeleteImages(ctx context.Context, employeeIDs []string) (int64, error) {
+	// The filter uses the string IDs directly because the MongoDB filed "empoyee_id" is a string
+	filter := bson.M{"employee_id": bson.M{"$in": employeeIDs}}
+
+	result, err := ImagesCollection.DeleteMany(ctx, filter)
+	if err != nil {
+		return 0, err
+	}
+
+	// Returns the number of images deleted
+	return result.DeletedCount, nil
+}
+
 func BulkDeleteEmployee(ctx context.Context, employeeIDs []int) (int64, error) {
 	if EmployeesCollection == nil {
 		return 0, errors.New("employees collection or initialized")
