@@ -109,7 +109,7 @@ type SQLiteSalaryCalcsRow struct {
 	MonthYear         string `json:"month_year" bson:"month_year"`
 	BaseSalary        int    `json:"base_salary" bson:"base_salary"`
 	ConsistencySalary int    `json:"consistency_salary" bson:"consistency_salary"`
-	BonusSalary       int    `json:"bonus_salary" bson:"consistency_salary"`
+	BonusSalary       int    `json:"bonus_salary" bson:"bonus_salary"`
 	AbscentType0      int    `json:"abscent_type_0" bson:"abscent_type_0"`
 	AbscentType1      int    `json:"abscent_type_1" bson:"abscent_type_1"`
 	Construction      int    `json:"construction" bson:"construction"`
@@ -652,7 +652,13 @@ func SyncSalaryCalcsHandler(w http.ResponseWriter, r *http.Request) {
 			Construction:      row.Construction,
 		}
 	}
-	salaryCalcsDocument := salaryCalcsMap
+
+	var documents []SQLiteSalaryCalcsRow
+	for _, doc := range salaryCalcsMap {
+		// *doc is a dereference
+		documents = append(documents, *doc)
+	}
+	salaryCalcsDocument := documents
 
 	if EmployeesSalaryCalcsCollection == nil { // check if go program has successfully prepared the instruction to talk to that collection
 		log.Println("MongoDB EmployeesCollection not initialized.")
