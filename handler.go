@@ -101,6 +101,8 @@ type SQLiteRow struct {
 	PresentState      int    `json:"present_state"`
 	ConstructionState int    `json:"construction_state"`
 	Remark            string `json:"remark"`
+	MonthYear         string `json:"month_year"`
+	Salary            int    `json:"salary"`
 }
 
 // 2. HTTP Request Body Payload
@@ -117,12 +119,18 @@ type DailyData struct {
 	Remark            string `json:"remark"`
 }
 
+type MonthlySalaryData struct {
+	MonthYear string `bson:"month_year" json:"month_year"`
+	Salary    int    `bson:"salary" json:"salary"`
+}
+
 // 4. Final MongoDB Employee Document Structure
 type EmployeeDocument struct {
-	ID        int         `bson:"_id" json:"_id"`   // Using _id employee_id for indexing/query efficiency
-	Name      string      `bson:"name" json:"name"` // adding json tag help with field names from response returned to your app
-	Role      string      `bson:"role" json:"role"`
-	DailyData []DailyData `bson:"daily_data" json:"daily_data"`
+	ID            int                          `bson:"_id" json:"_id"`   // Using _id employee_id for indexing/query efficiency
+	Name          string                       `bson:"name" json:"name"` // adding json tag help with field names from response returned to your app
+	Role          string                       `bson:"role" json:"role"`
+	DailyData     []DailyData                  `bson:"daily_data" json:"daily_data"`
+	MonthlySalary map[string]MonthlySalaryData `bson:"salary_data" json:"salary_data"`
 }
 
 // DELETE THIS HARDCODED MAP
@@ -378,13 +386,21 @@ func transformData(rows []SQLiteRow) []EmployeeDocument {
 			// if !ok, which mean not ok is false, creates the new EmployeeDocument and initializing base data (ID, Name, Role)
 			// and the empty daily data slice
 			employeeMap[row.EmployeeID] = &EmployeeDocument{ // use struct to assign data to a map
-				ID:        row.EmployeeID,
-				Name:      row.Name,
-				Role:      row.Role,
-				DailyData: make([]DailyData, 0), // Initialize the slice (array but better)
+				ID:            row.EmployeeID,
+				Name:          row.Name,
+				Role:          row.Role,
+				DailyData:     make([]DailyData, 0), // Initialize the slice (array but better)
+				MonthlySalary: make(map[string]MonthlySalaryData),
 			}
 		}
 
+		if _, ok := employeeMap[row.EmployeeID].MonthlySalary[row.MonthYear]; !ok { // automatic dereferencing, as employeeMap already point to the address of employee document
+			// you don't have to make new pointers inside it.
+			employeeMap[row.EmployeeID].MonthlySalary[row.MonthYear] = MonthlySalaryData{
+				MonthYear: row.MonthYear,
+				Salary:    row.Salary,
+			}
+		}
 		// 2. Create the nested DailyData sub-document
 		dailyEntry := DailyData{
 			Date:              row.Date,
