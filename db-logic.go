@@ -19,7 +19,8 @@ var MongoClient *mongo.Client
 var ImagesCollection *mongo.Collection
 var MoviesCollection *mongo.Collection
 var UsersCollection *mongo.Collection
-var EmployeesCollection *mongo.Collection // Collection for employee data
+var EmployeesCollection *mongo.Collection            // Collection for employee data
+var EmployeesSalaryCalcsCollection *mongo.Collection // Collection for employee data
 
 func BulkDeleteImages(ctx context.Context, employeeIDs []string) (int64, error) {
 	// The filter uses the string IDs directly because the MongoDB filed "empoyee_id" is a string
@@ -106,6 +107,7 @@ func ConnectDB() error {
 	UsersCollection = MongoClient.Database("authdb").Collection("users")
 	// Set new Employees Collection
 	EmployeesCollection = MongoClient.Database("employee_db").Collection("employees")
+	EmployeesSalaryCalcsCollection = MongoClient.Database("employee_db").Collection("employees_salary_calcs")
 	ImagesCollection = MongoClient.Database("employee_db").Collection("images")
 	log.Println("Successfully connected to MongoDB and initialized collections.")
 

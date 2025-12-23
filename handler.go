@@ -105,9 +105,23 @@ type SQLiteRow struct {
 	Salary            int    `json:"salary"`
 }
 
+type SQLiteSalaryCalcsRow struct {
+	MonthYear         string `json:"month_year" bson:"month_year"`
+	BaseSalary        int    `json:"base_salary" bson:"base_salary"`
+	ConsistencySalary int    `json:"consistency_salary" bson:"consistency_salary"`
+	BonusSalary       int    `json:"bonus_salary" bson:"consistency_salary"`
+	AbscentType0      int    `json:"abscent_type_0" bson:"abscent_type_0"`
+	AbscentType1      int    `json:"abscent_type_1" bson:"abscent_type_1"`
+	Construction      int    `json:"construction" bson:"construction"`
+}
+
 // 2. HTTP Request Body Payload
 type SyncPayload struct {
 	Records []SQLiteRow `json:"records"`
+}
+
+type SyncSalaryCalcsPayload struct {
+	Records []SQLiteSalaryCalcsRow `json:"records"`
 }
 
 // 3. Final MongoDB Sub-Document for daily data
@@ -514,7 +528,7 @@ func DownloadDataHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if EmployeesCollection == nil {
+	if EmployeesCollection == nil || EmployeesSalaryCalcsCollection == nil {
 		log.Println("MongoDB EmployeesCollection not initalized.")
 		http.Error(w, "Server configuration error", http.StatusInternalServerError)
 		return
@@ -534,11 +548,27 @@ func DownloadDataHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	defer cursor.Close(ctx) // Ensure the cursor is closed
+	cursor2, err := EmployeesSalaryCalcsCollection.Find(ctx, filter)
+	if err != nil {
+		log.Printf("MongoDB Find error: %v", err)
+		http.Error(w, "Internal server error during cloud query", http.StatusInternalServerError)
+		return
+	}
+
+	defer cursor.Close(ctx)  // Ensure the cursor is closed
+	defer cursor2.Close(ctx) // Ensure the cursor is closed
 
 	// 2. Decode all documents into a slice
-	var employees []EmployeeDocument                   // EmployeeDocument is the struct you defined for MongoDB
+	var employees []EmployeeDocument
+	var salaryCalcs []SQLiteSalaryCalcsRow             // EmployeeDocument is the struct you defined for MongoDB
 	if err = cursor.All(ctx, &employees); err != nil { // write the result back to the memory location of the employee slice variable
+		// for each document, it creates a new EmployeeDocument struct and appends it to the slice pointed to by &employee.
+		log.Printf("MongoDB Cursor decoding error: %v", err)
+		http.Error(w, "Internal server error during data processing", http.StatusInternalServerError)
+		return
+	}
+
+	if err = cursor2.All(ctx, &salaryCalcs); err != nil { // write the result back to the memory location of the employee slice variable
 		// for each document, it creates a new EmployeeDocument struct and appends it to the slice pointed to by &employee.
 		log.Printf("MongoDB Cursor decoding error: %v", err)
 		http.Error(w, "Internal server error during data processing", http.StatusInternalServerError)
@@ -551,8 +581,9 @@ func DownloadDataHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Send the array of employee documents inside a wrapping object
 	response := map[string]interface{}{
-		"employees": employees,
-		"message":   fmt.Sprintf("Retrieved %d employee documents from cloud.", len(employees)),
+		"employees":    employees,
+		"salary_calcs": salaryCalcs,
+		"message":      fmt.Sprintf("Retrieved %d employee documents from cloud.", len(employees)),
 	}
 	// returns structure similar to this:
 	// {
@@ -580,6 +611,85 @@ func DownloadDataHandler(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewEncoder(w).Encode(response); err != nil { // encodes into a json string and send it back to your application
 		log.Printf("Error encoding JSON response: %v", err)
 	}
+}
+
+// --- SYNCHRONIZATION FOR SALARY CALCS HANDLER ---
+
+func SyncSalaryCalcsHandler(w http.ResponseWriter, r *http.Request) {
+
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// 1. Decode the JSON payload
+	var payload SyncSalaryCalcsPayload
+	// NewDecoder reads the body and Decode for assigning data into the struct
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil { // pass in a pointer to the struct to modify its data directly
+		log.Printf("Sync decode error: %v", err)
+		http.Error(w, "Invalid request payload", http.StatusBadRequest)
+		return
+	}
+
+	if len(payload.Records) == 0 {
+
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]string{
+			"messages": "No records provied to sync.",
+		})
+		return
+	}
+
+	salaryCalcsMap := make(map[string]*SQLiteSalaryCalcsRow)
+	for _, row := range payload.Records {
+		salaryCalcsMap[row.MonthYear] = &SQLiteSalaryCalcsRow{
+			MonthYear:         row.MonthYear,
+			BaseSalary:        row.BaseSalary,
+			ConsistencySalary: row.ConsistencySalary,
+			BonusSalary:       row.BonusSalary,
+			AbscentType0:      row.AbscentType0,
+			AbscentType1:      row.AbscentType1,
+			Construction:      row.Construction,
+		}
+	}
+	salaryCalcsDocument := salaryCalcsMap
+
+	if EmployeesSalaryCalcsCollection == nil { // check if go program has successfully prepared the instruction to talk to that collection
+		log.Println("MongoDB EmployeesCollection not initialized.")
+		http.Error(w, "Server configuration error", http.StatusInternalServerError)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+	defer cancel()
+
+	var writes []mongo.WriteModel
+
+	for _, doc := range salaryCalcsDocument {
+		model := mongo.NewReplaceOneModel().
+			SetFilter(bson.D{{Key: "month_year", Value: doc.MonthYear}}).
+			SetReplacement(doc).
+			SetUpsert(true) // Crucial: Insert if the document does not exist
+		writes = append(writes, model)
+	}
+
+	result, err := EmployeesSalaryCalcsCollection.BulkWrite(ctx, writes)
+	if err != nil {
+		log.Printf("MongoDB Bulk Write Failed: %v", err)
+		http.Error(w, "Failed to sync data to cloud database", http.StatusInternalServerError)
+		return
+	}
+
+	// 4. Success Response
+	log.Printf("Sync successful: Inserted/Updated %d documents.", result.UpsertedCount)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{
+		"message":       fmt.Sprintf("Sync complete. Total upserted/matched: %d", result.UpsertedCount+result.ModifiedCount),
+		"upsertedCount": fmt.Sprintf("%d", result.UpsertedCount),
+		"modifiedCount": fmt.Sprintf("%d", result.ModifiedCount),
+	})
 }
 
 // --- SYNCHRONIZATION HANDLER ---
@@ -1084,6 +1194,7 @@ func Server() {
 	mux.HandleFunc("/profile", AuthMiddleware(ProfileHandler))
 	// mux.HandleFunc("/sync/upload-data", AuthMiddleware(SyncDataHandler))
 	mux.HandleFunc("/sync/upload-data", SyncDataHandler)
+	mux.HandleFunc("/sync/upload-calcs-data", SyncSalaryCalcsHandler)
 	mux.HandleFunc("/sync/download-data", DownloadDataHandler)
 	mux.HandleFunc("/sync/employee/{id}", deleteEmployeeHandler)
 	mux.HandleFunc("/api/upload", UploadImageHandler)
