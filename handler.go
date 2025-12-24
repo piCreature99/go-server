@@ -841,7 +841,7 @@ func LoginHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 4. Create the JWT Token (Now includes the role from MongoDB)
-	expirationTime := time.Now().Add(120 * time.Minute)
+	expirationTime := time.Now().Add(5 * time.Minute)
 
 	claims := jwt.MapClaims{
 		"user": foundUser.Username,
@@ -1199,12 +1199,12 @@ func Server() {
 	// NEW: Protected route using the AuthMiddleware
 	mux.HandleFunc("/profile", AuthMiddleware(ProfileHandler))
 	// mux.HandleFunc("/sync/upload-data", AuthMiddleware(SyncDataHandler))
-	mux.HandleFunc("/sync/upload-data", SyncDataHandler)
-	mux.HandleFunc("/sync/upload-calcs-data", SyncSalaryCalcsHandler)
-	mux.HandleFunc("/sync/download-data", DownloadDataHandler)
-	mux.HandleFunc("/sync/employee/{id}", deleteEmployeeHandler)
-	mux.HandleFunc("/api/upload", UploadImageHandler)
-	mux.HandleFunc("/api/get", DownloadImagesHandler)
+	mux.HandleFunc("/sync/upload-data", AuthMiddleware(SyncDataHandler))
+	mux.HandleFunc("/sync/upload-calcs-data", AuthMiddleware(SyncSalaryCalcsHandler))
+	mux.HandleFunc("/sync/download-data", AuthMiddleware(DownloadDataHandler))
+	mux.HandleFunc("/sync/employee/{id}", AuthMiddleware(deleteEmployeeHandler))
+	mux.HandleFunc("/api/upload", AuthMiddleware(UploadImageHandler))
+	mux.HandleFunc("/api/get", AuthMiddleware(DownloadImagesHandler))
 
 	// ctx, cancelCtx := context.WithCancel(context.Background()) // ctx is context.Context
 	serverOne := &http.Server{ // initialize a struct
