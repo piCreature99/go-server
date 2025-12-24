@@ -841,7 +841,7 @@ func LoginHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 4. Create the JWT Token (Now includes the role from MongoDB)
-	expirationTime := time.Now().Add(5 * time.Minute)
+	expirationTime := time.Now().Add(1 * time.Minute)
 
 	claims := jwt.MapClaims{
 		"user": foundUser.Username,
