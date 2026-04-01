@@ -41,7 +41,7 @@ func main() {
 	// Get the variable from env file
 	err0 := godotenv.Load("dburi.env")
 	if err0 != nil {
-		log.Fatal("Error loading or .env file not found, using system environmental variables...")
+		log.Println("Error loading or .env file not found, using system environmental variables...")
 	}
 
 	// InitDriveService()
