@@ -1,2 +1,6 @@
 # Configuration file containing sensitive data
 credentials.json
+# ignore the folder and its contents
+notes/
+dburi.env
+.env

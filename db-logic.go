@@ -17,6 +17,9 @@ import (
 var MongoClient *mongo.Client
 
 var ImagesCollection *mongo.Collection
+var RolesCollection *mongo.Collection
+var EmployeesRolesCollection *mongo.Collection
+var SalaryTypeCalcs *mongo.Collection
 var MoviesCollection *mongo.Collection
 var UsersCollection *mongo.Collection
 var EmployeesCollection *mongo.Collection            // Collection for employee data
@@ -72,6 +75,7 @@ func DeleteEmployee(ctx context.Context, employeeID int) (int64, error) {
 }
 
 func ConnectDB() error {
+
 	uri := os.Getenv("MONGODB_URI")
 	docs := "www.mongodb.com/docs/drivers/go/current/"
 	if uri == "" {
@@ -109,6 +113,9 @@ func ConnectDB() error {
 	EmployeesCollection = MongoClient.Database("employee_db").Collection("employees")
 	EmployeesSalaryCalcsCollection = MongoClient.Database("employee_db").Collection("employees_salary_calcs")
 	ImagesCollection = MongoClient.Database("employee_db").Collection("images")
+	RolesCollection = MongoClient.Database("employee_db").Collection("roles")
+	EmployeesRolesCollection = MongoClient.Database("employee_db").Collection("employees_roles")
+	SalaryTypeCalcs = MongoClient.Database("employee_db").Collection("salary_type_calcs")
 	log.Println("Successfully connected to MongoDB and initialized collections.")
 
 	return nil

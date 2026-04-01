@@ -3,6 +3,7 @@ package main
 import (
 	// Note: Also remove the 'os' import.
 
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -22,6 +23,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 
 	"github.com/golang-jwt/jwt/v5"
+
 	// "os"
 
 	// "bytes"
@@ -93,26 +95,48 @@ type UserAuth struct {
 // --- SYNCHRONIZATION STRUCTS ---
 // 1. Incoming flattened row from the React Native app
 type SQLiteRow struct {
-	EmployeeID        int    `json:"employee_id"`
-	Name              string `json:"name"`
-	Role              string `json:"role"`
-	Date              string `json:"date"`
-	IsSynced          int    `json:"is_synced"`
-	PresentState      int    `json:"present_state"`
-	ConstructionState int    `json:"construction_state"`
-	Remark            string `json:"remark"`
-	MonthYear         string `json:"month_year"`
-	Salary            int    `json:"salary"`
+	EmployeeID        int     `json:"employee_id"`
+	Name              string  `json:"name"`
+	Role              string  `json:"role"`
+	Date              string  `json:"date"`
+	IsSynced          int     `json:"is_synced"`
+	PresentState      int     `json:"present_state"`
+	ConstructionState int     `json:"construction_state"`
+	Remark            string  `json:"remark"`
+	MonthYear         string  `json:"month_year"`
+	Salary            float64 `json:"salary"`
 }
 
 type SQLiteSalaryCalcsRow struct {
-	MonthYear         string `json:"month_year" bson:"month_year"`
-	BaseSalary        int    `json:"base_salary" bson:"base_salary"`
-	ConsistencySalary int    `json:"consistency_salary" bson:"consistency_salary"`
-	BonusSalary       int    `json:"bonus_salary" bson:"bonus_salary"`
-	AbscentType0      int    `json:"abscent_type_0" bson:"abscent_type_0"`
-	AbscentType1      int    `json:"abscent_type_1" bson:"abscent_type_1"`
-	Construction      int    `json:"construction" bson:"construction"`
+	MonthYear         string  `json:"month_year" bson:"month_year"`
+	RoleID            int     `json:"role_id" bson:"role_id"`
+	BaseSalary        float64 `json:"base_salary" bson:"base_salary"`
+	ConsistencySalary float64 `json:"consistency_salary" bson:"consistency_salary"`
+	BonusSalary       float64 `json:"bonus_salary" bson:"bonus_salary"`
+	AbscentType0      int     `json:"abscent_type_0" bson:"abscent_type_0"`
+	AbscentType1      int     `json:"abscent_type_1" bson:"abscent_type_1"`
+	Construction      int     `json:"construction" bson:"construction"`
+}
+
+type SQLiteSalaryTypeCalcsRow struct {
+	CalcsId      int    `json:"calcs_id" bson:"calcs_id"`
+	MonthYear    string `json:"month_year" bson:"month_year"`
+	AbscentType0 int    `json:"abscent_type_0" bson:"abscent_type_0"`
+	AbscentType1 int    `json:"abscent_type_1" bson:"abscent_type_1"`
+	Construction int    `json:"construction" bson:"construction"`
+}
+
+type SQLiteRolesRow struct {
+	RoleId   int    `json:"role_id" bson:"role_id"`
+	RoleName string `json:"role_name" bson:"role_name"`
+}
+
+type SQLiteEmployeesRolesRow struct {
+	RoleSpanId   int    `json:"role_span_id" bson:"role_span_id"`
+	RoleId       int    `json:"role_id" bson:"role_id"`
+	StartDate    string `json:"start_date" bson:"start_date"`
+	EndDate      string `json:"end_date" bson:"end_date"`
+	EmployeeIdFk int    `json:"employee_id_fk" bson:"employee_id_fk"`
 }
 
 // 2. HTTP Request Body Payload
@@ -122,6 +146,18 @@ type SyncPayload struct {
 
 type SyncSalaryCalcsPayload struct {
 	Records []SQLiteSalaryCalcsRow `json:"records"`
+}
+
+type SyncSalaryTypeCalcsPayload struct {
+	Records []SQLiteSalaryTypeCalcsRow `json:"records"`
+}
+
+type SyncRolesPayload struct {
+	Records []SQLiteRolesRow `json:"records"`
+}
+
+type SyncEmployeesRolesPayload struct {
+	Records []SQLiteEmployeesRolesRow `json:"records"`
 }
 
 // 3. Final MongoDB Sub-Document for daily data
@@ -134,8 +170,8 @@ type DailyData struct {
 }
 
 type MonthlySalaryData struct {
-	MonthYear string `bson:"month_year" json:"month_year"`
-	Salary    int    `bson:"salary" json:"salary"`
+	MonthYear string  `bson:"month_year" json:"month_year"`
+	Salary    float64 `bson:"salary" json:"salary"`
 }
 
 // 4. Final MongoDB Employee Document Structure
@@ -198,7 +234,7 @@ func DownloadImagesHandler(w http.ResponseWriter, r *http.Request) {
 
 	// 1. Decode IDs we want to download
 	var ids []string
-	if err := json.NewDecoder(r.Body).Decode(&ids); err != nil {
+	if err := json.NewDecoder(r.Body).Decode(&ids); err != nil { // Decode accept type of slice, struct, map, and string
 		http.Error(w, "Invalid JSON", http.StatusBadRequest)
 		return
 	}
@@ -221,8 +257,10 @@ func DownloadImagesHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 3. Send back the array of image data
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(results)
+	w.Header().Set("Content-Type", "application/json") // 1st param: tell the receiver how read the data.
+	// 2nd param: application -> This means the data is intended to be processed by a program (not just a raw text file for a human to read).
+	// json -> This is the specific sub-type. it tells the program, "You should use your JSON parser to read this."
+	json.NewEncoder(w).Encode(results) // returns the same json string regardless of the passed type
 }
 
 // --- UPLOAD IMAGE HANDLER ---
@@ -528,7 +566,7 @@ func DownloadDataHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if EmployeesCollection == nil || EmployeesSalaryCalcsCollection == nil {
+	if EmployeesCollection == nil || EmployeesSalaryCalcsCollection == nil || SalaryTypeCalcs == nil || EmployeesRolesCollection == nil || RolesCollection == nil {
 		log.Println("MongoDB EmployeesCollection not initalized.")
 		http.Error(w, "Server configuration error", http.StatusInternalServerError)
 		return
@@ -555,12 +593,40 @@ func DownloadDataHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	cursor3, err := SalaryTypeCalcs.Find(ctx, filter)
+	if err != nil {
+		log.Printf("MongoDB Find error: %v", err)
+		http.Error(w, "Internal server error during cloud query", http.StatusInternalServerError)
+		return
+	}
+
+	cursor4, err := EmployeesRolesCollection.Find(ctx, filter)
+	if err != nil {
+		log.Printf("MongoDB Find error: %v", err)
+		http.Error(w, "Internal server error during cloud query", http.StatusInternalServerError)
+		return
+	}
+
+	cursor5, err := RolesCollection.Find(ctx, filter)
+	if err != nil {
+		log.Printf("MongoDB Find error: %v", err)
+		http.Error(w, "Internal server error during cloud query", http.StatusInternalServerError)
+		return
+	}
+
+	defer cursor5.Close(ctx) // Ensure the cursor is closed in reverse order
+	defer cursor4.Close(ctx) // Ensure the cursor is closed in reverse order
+	defer cursor3.Close(ctx) // Ensure the cursor is closed in reverse order
+	defer cursor2.Close(ctx) // Ensure the cursor is closed in reverse order
 	defer cursor.Close(ctx)  // Ensure the cursor is closed
-	defer cursor2.Close(ctx) // Ensure the cursor is closed
 
 	// 2. Decode all documents into a slice
 	var employees []EmployeeDocument
-	var salaryCalcs []SQLiteSalaryCalcsRow             // EmployeeDocument is the struct you defined for MongoDB
+	var salaryCalcs []SQLiteSalaryCalcsRow
+	var salaryTypeCalcs0 []SQLiteSalaryTypeCalcsRow // EmployeeDocument is the struct you defined for MongoDB
+	var employeesRoles []SQLiteEmployeesRolesRow
+	var roles []SQLiteRolesRow
+
 	if err = cursor.All(ctx, &employees); err != nil { // write the result back to the memory location of the employee slice variable
 		// for each document, it creates a new EmployeeDocument struct and appends it to the slice pointed to by &employee.
 		log.Printf("MongoDB Cursor decoding error: %v", err)
@@ -575,15 +641,39 @@ func DownloadDataHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err = cursor3.All(ctx, &salaryTypeCalcs0); err != nil { // write the result back to the memory location of the employee slice variable
+		// for each document, it creates a new EmployeeDocument struct and appends it to the slice pointed to by &employee.
+		log.Printf("MongoDB Cursor decoding error: %v", err)
+		http.Error(w, "Internal server error during data processing", http.StatusInternalServerError)
+		return
+	}
+
+	if err = cursor4.All(ctx, &employeesRoles); err != nil { // write the result back to the memory location of the employee slice variable
+		// for each document, it creates a new EmployeeDocument struct and appends it to the slice pointed to by &employee.
+		log.Printf("MongoDB Cursor decoding error: %v", err)
+		http.Error(w, "Internal server error during data processing", http.StatusInternalServerError)
+		return
+	}
+
+	if err = cursor5.All(ctx, &roles); err != nil { // write the result back to the memory location of the employee slice variable
+		// for each document, it creates a new EmployeeDocument struct and appends it to the slice pointed to by &employee.
+		log.Printf("MongoDB Cursor decoding error: %v", err)
+		http.Error(w, "Internal server error during data processing", http.StatusInternalServerError)
+		return
+	}
+
 	// 3. Send the JSON resposne
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 
 	// Send the array of employee documents inside a wrapping object
 	response := map[string]interface{}{
-		"employees":    employees,
-		"salary_calcs": salaryCalcs,
-		"message":      fmt.Sprintf("Retrieved %d employee documents from cloud.", len(employees)),
+		"employees":         employees,
+		"salary_calcs":      salaryCalcs,
+		"salary_type_calcs": salaryTypeCalcs0,
+		"roles":             roles,
+		"employees_roles":   employeesRoles,
+		"message":           fmt.Sprintf("Retrieved %d employee documents from cloud.", len(employees)),
 	}
 	// returns structure similar to this:
 	// {
@@ -613,6 +703,258 @@ func DownloadDataHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// --- SYNCHRONIZATION FOR ROLES HANDLER ---
+
+func SyncRolesHandler(w http.ResponseWriter, r *http.Request) {
+
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var payload SyncRolesPayload
+
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		log.Printf("Sync decode error: %v", err)
+		http.Error(w, "Invalid request payload", http.StatusBadRequest)
+		return
+	}
+
+	fmt.Println(payload)
+
+	if len(payload.Records) == 0 {
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]string{
+			"messages": "No records provided to sync.",
+		})
+		return
+	}
+
+	rolesMap := make(map[int]*SQLiteRolesRow)
+	for _, row := range payload.Records {
+		rolesMap[row.RoleId] = &SQLiteRolesRow{
+			RoleId:   row.RoleId,
+			RoleName: row.RoleName,
+		}
+	}
+
+	var documents []SQLiteRolesRow
+	for _, doc := range rolesMap {
+		documents = append(documents, *doc)
+	}
+	RolesDocument := documents
+
+	if RolesCollection == nil {
+		log.Println("MongoDB EmployeesCollection not initialized.")
+		http.Error(w, "Server configuration error", http.StatusInternalServerError)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+	defer cancel()
+
+	var writes []mongo.WriteModel
+
+	for _, doc := range RolesDocument {
+		model := mongo.NewReplaceOneModel().
+			SetFilter(bson.D{{Key: "role_id", Value: doc.RoleId}}).
+			SetReplacement(doc).
+			SetUpsert(true)
+		writes = append(writes, model)
+	}
+
+	_, err := RolesCollection.DeleteMany(ctx, bson.D{})
+	if err != nil {
+		log.Printf("Failed to clear role collection: %v", err)
+	}
+
+	result, err := RolesCollection.BulkWrite(ctx, writes)
+	if err != nil {
+		log.Printf("MongoDB Bulk Write Failed: %v", err)
+		http.Error(w, "Failed to sync data to cloud database", http.StatusInternalServerError)
+		return
+	}
+
+	log.Printf("Sync successful: Inserted/Updated %d documents.", result.UpsertedCount)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{
+		"message":       fmt.Sprintf("Sync complete. Total upserted/matched :%d", result.UpsertedCount+result.ModifiedCount),
+		"upsertedCount": fmt.Sprintf("%d", result.UpsertedCount),
+		"modifiedCount": fmt.Sprintf("%d", result.ModifiedCount),
+	})
+}
+
+// --- SYNCHRONIZATION FOR SALARY TYPE CALCS HANDLER ---
+
+func SyncEmployeesRolesHandler(w http.ResponseWriter, r *http.Request) {
+
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var payload SyncEmployeesRolesPayload
+
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		log.Printf("Sync decode error: %v", err)
+		http.Error(w, "Invalid request payload", http.StatusBadRequest)
+		return
+	}
+
+	if len(payload.Records) == 0 {
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]string{
+			"messages": "No records provided to sync.",
+		})
+		return
+	}
+
+	EmployeesRolesMap := make(map[int]*SQLiteEmployeesRolesRow)
+	for _, row := range payload.Records {
+		EmployeesRolesMap[row.RoleSpanId] = &SQLiteEmployeesRolesRow{
+			RoleSpanId:   row.RoleSpanId,
+			RoleId:       row.RoleId,
+			StartDate:    row.StartDate,
+			EndDate:      row.EndDate,
+			EmployeeIdFk: row.EmployeeIdFk,
+		}
+	}
+
+	var documents []SQLiteEmployeesRolesRow
+	for _, doc := range EmployeesRolesMap {
+		documents = append(documents, *doc)
+	}
+	EmployeesRolesDocument := documents
+
+	if EmployeesRolesCollection == nil {
+		log.Println("MongoDB EmployeesCollection not initialized.")
+		http.Error(w, "Server configuration error", http.StatusInternalServerError)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+	defer cancel()
+
+	var writes []mongo.WriteModel
+
+	for _, doc := range EmployeesRolesDocument {
+		model := mongo.NewReplaceOneModel().
+			SetFilter(bson.D{{Key: "role_span_id", Value: doc.RoleSpanId}}).
+			SetReplacement(doc).
+			SetUpsert(true)
+		writes = append(writes, model)
+	}
+
+	_, err := EmployeesRolesCollection.DeleteMany(ctx, bson.D{})
+	if err != nil {
+		log.Printf("Failed to clear collection: %v", err)
+	}
+
+	result, err := EmployeesRolesCollection.BulkWrite(ctx, writes)
+	if err != nil {
+		log.Printf("MongoDB Bulk Write Failed: %v", err)
+		http.Error(w, "Failed to sync data to cloud database", http.StatusInternalServerError)
+		return
+	}
+
+	log.Printf("Sync successful: Inserted/Updated %d documents.", result.UpsertedCount)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{
+		"message":       fmt.Sprintf("Sync complete. Total upserted/matched :%d", result.UpsertedCount+result.ModifiedCount),
+		"upsertedCount": fmt.Sprintf("%d", result.UpsertedCount),
+		"modifiedCount": fmt.Sprintf("%d", result.ModifiedCount),
+	})
+}
+
+// --- SYNCHRONIZATION FOR SALARY TYPE CALCS HANDLER ---
+
+func SyncSalaryTypeCalcsHandler(w http.ResponseWriter, r *http.Request) {
+
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var payload SyncSalaryTypeCalcsPayload
+
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		log.Printf("Sync decode error: %v", err)
+		http.Error(w, "Invalid request payload", http.StatusBadRequest)
+		return
+	}
+
+	if len(payload.Records) == 0 {
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]string{
+			"messages": "No records provided to sync.",
+		})
+		return
+	}
+
+	fmt.Println(payload.Records)
+	salaryTypeCalcsMap := make(map[string]*SQLiteSalaryTypeCalcsRow)
+	for _, row := range payload.Records {
+		salaryTypeCalcsMap[row.MonthYear] = &SQLiteSalaryTypeCalcsRow{
+			CalcsId:      row.CalcsId,
+			MonthYear:    row.MonthYear,
+			AbscentType0: row.AbscentType0,
+			AbscentType1: row.AbscentType1,
+			Construction: row.Construction,
+		}
+	}
+
+	var documents []SQLiteSalaryTypeCalcsRow
+	for _, doc := range salaryTypeCalcsMap {
+		documents = append(documents, *doc)
+	}
+	salaryTypeCalcsDocument := documents
+
+	if SalaryTypeCalcs == nil {
+		log.Println("MongoDB EmployeesCollection not initialized.")
+		http.Error(w, "Server configuration error", http.StatusInternalServerError)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+	defer cancel()
+
+	var writes []mongo.WriteModel
+
+	for _, doc := range salaryTypeCalcsDocument {
+		model := mongo.NewReplaceOneModel().
+			SetFilter(bson.D{{Key: "month_year", Value: doc.MonthYear}}).
+			SetReplacement(doc).
+			SetUpsert(true)
+		writes = append(writes, model)
+	}
+
+	_, err := SalaryTypeCalcs.DeleteMany(ctx, bson.D{})
+	if err != nil {
+		log.Printf("Failed to clear collection: %v", err)
+	}
+
+	result, err := SalaryTypeCalcs.BulkWrite(ctx, writes)
+	if err != nil {
+		log.Printf("MongoDB Bulk Write Failed: %v", err)
+		http.Error(w, "Failed to sync data to cloud database", http.StatusInternalServerError)
+		return
+	}
+
+	log.Printf("Sync successful: Inserted/Updated %d documents.", result.UpsertedCount)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{
+		"message":       fmt.Sprintf("Sync complete. Total upserted/matched :%d", result.UpsertedCount+result.ModifiedCount),
+		"upsertedCount": fmt.Sprintf("%d", result.UpsertedCount),
+		"modifiedCount": fmt.Sprintf("%d", result.ModifiedCount),
+	})
+}
+
 // --- SYNCHRONIZATION FOR SALARY CALCS HANDLER ---
 
 func SyncSalaryCalcsHandler(w http.ResponseWriter, r *http.Request) {
@@ -640,10 +982,11 @@ func SyncSalaryCalcsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	salaryCalcsMap := make(map[string]*SQLiteSalaryCalcsRow)
+	salaryCalcsMap := make(map[string]*SQLiteSalaryCalcsRow) // in case of duplicate month year, only one survive
 	for _, row := range payload.Records {
 		salaryCalcsMap[row.MonthYear] = &SQLiteSalaryCalcsRow{
 			MonthYear:         row.MonthYear,
+			RoleID:            row.RoleID,
 			BaseSalary:        row.BaseSalary,
 			ConsistencySalary: row.ConsistencySalary,
 			BonusSalary:       row.BonusSalary,
@@ -679,7 +1022,12 @@ func SyncSalaryCalcsHandler(w http.ResponseWriter, r *http.Request) {
 		writes = append(writes, model)
 	}
 
-	result, err := EmployeesSalaryCalcsCollection.BulkWrite(ctx, writes)
+	_, err := EmployeesSalaryCalcsCollection.DeleteMany(ctx, bson.D{})
+	if err != nil {
+		log.Printf("Failed to clear collection: %v", err)
+	}
+
+	result, err := EmployeesSalaryCalcsCollection.BulkWrite(ctx, writes) // BulkWrite packs all instruction into one single suitcase (faster than separate requests)
 	if err != nil {
 		log.Printf("MongoDB Bulk Write Failed: %v", err)
 		http.Error(w, "Failed to sync data to cloud database", http.StatusInternalServerError)
@@ -759,6 +1107,10 @@ func SyncDataHandler(w http.ResponseWriter, r *http.Request) {
 		// this is basically insert and prevent duplication
 	}
 
+	_, err := EmployeesCollection.DeleteMany(ctx, bson.D{})
+	if err != nil {
+		log.Printf("Failed to clear collection: %v", err)
+	}
 	// Perform the bulk operation
 	result, err := EmployeesCollection.BulkWrite(ctx, writes)
 	if err != nil {
@@ -787,12 +1139,37 @@ func LoginHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 1. Decode credentials from request body
-
+	// anonymouse struct and declare it at once, basically creds is a variabe name with type of that struct and can be assigned values
 	var creds struct { // similar structural purpose to interface, we're not using bson.m in this case because it's more type safe with clarity
 		Username string `json:"username"`
 		Password string `json:"password"`
 	}
+
+	bodyBytes, err0 := io.ReadAll(r.Body)
+	if err0 != nil {
+		http.Error(w, "Can't read body", http.StatusBadRequest)
+		return
+	}
+	// Method and Path (e.g., GET /sync/download-data)
+	fmt.Printf("Request: %s %s %s\n", r.Method, r.URL.Path, r.Proto)
+
+	// The Host (Dedicated field)
+	fmt.Printf("Host: %s\n", r.Host)
+
+	// Content-Length (Dedicated field - int64)
+	fmt.Printf("Incoming data size: %d bytes\n", r.ContentLength)
+
+	// Headers (Accessed from the r.Header map)
+	fmt.Printf("Content-Type: %s\n", r.Header.Get("Content-Type"))
+	fmt.Printf("User-Authorization: %s\n", r.Header.Get("Authorization"))
+	fmt.Printf("User-Agent: %s\n", r.Header.Get("User-Agent"))
+	fmt.Printf("Accept: %s\n\n", r.Header.Get("Accept"))
+
+	fmt.Printf("Actual body String: %s\n", string(bodyBytes))
+	fmt.Println("-------------------------------------------------")
 	// it's still fine if the body have extra fields
+
+	r.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
 
 	if err := json.NewDecoder(r.Body).Decode(&creds); err != nil { // get the body from curl and decode it into go variable with structure of creds
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
@@ -814,7 +1191,11 @@ func LoginHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Filter to find the document by username
-	filter := bson.M{"username": creds.Username}
+	filter := bson.M{"username": creds.Username} // This is map initialization (use string as field name)
+	// accessing a struct field use dot notation, accessing a map field use bracket and key
+	// struct: struct1.value1
+	// map: map1["item1"]
+	// unlike typescript where you can do both with an object of type interface
 
 	// Create a request context with a timeout
 	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
@@ -841,7 +1222,7 @@ func LoginHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 4. Create the JWT Token (Now includes the role from MongoDB)
-	expirationTime := time.Now().Add(10 * time.Minute)
+	expirationTime := time.Now().Add(60 * time.Minute)
 
 	claims := jwt.MapClaims{
 		"user": foundUser.Username,
@@ -876,7 +1257,7 @@ func LoginHandler(w http.ResponseWriter, r *http.Request) {
 	// HS256 requires a shared secret key
 
 	// Sign the token using the secret key
-	tokenString, err := token.SignedString([]byte(jwtSecret))
+	tokenString, err := token.SignedString([]byte(jwtSecret)) // converts into a slice of byte
 	// []bypte() converts the secret key from a string into a slice of bytes ([]byte)
 	// Go takes the sequence of characters and converts them into their raw binary representation (typically using UTF-8 encoding).
 	// The key itself doesn't "look" different to you, but to the computer,
@@ -1158,7 +1539,7 @@ func getRoot(w http.ResponseWriter, r *http.Request) {
 	io.WriteString(w, "This is my website!\n")
 }
 func getHello(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
+	ctx := r.Context() // r is automatically dereferenced (for struct)
 
 	fmt.Printf("%s: got /hello request \n", ctx.Value(keyServerAddr))
 
@@ -1181,6 +1562,7 @@ func Server() {
 	if port == "" {
 		port = "8080" //Fallback for local development if PORT is not set
 	}
+
 	jwtSecret = os.Getenv("JWT_SECRET")
 	if jwtSecret == "" {
 		fmt.Println("FATAL: JWT_SECRET is missing.")
@@ -1201,6 +1583,9 @@ func Server() {
 	// mux.HandleFunc("/sync/upload-data", AuthMiddleware(SyncDataHandler))
 	mux.HandleFunc("/sync/upload-data", AuthMiddleware(SyncDataHandler))
 	mux.HandleFunc("/sync/upload-calcs-data", AuthMiddleware(SyncSalaryCalcsHandler))
+	mux.HandleFunc("/sync/upload-type-calcs-data", AuthMiddleware(SyncSalaryTypeCalcsHandler))
+	mux.HandleFunc("/sync/upload-roles", AuthMiddleware(SyncRolesHandler))
+	mux.HandleFunc("/sync/upload-employees-roles", AuthMiddleware(SyncEmployeesRolesHandler))
 	mux.HandleFunc("/sync/download-data", AuthMiddleware(DownloadDataHandler))
 	mux.HandleFunc("/sync/employee/{id}", AuthMiddleware(deleteEmployeeHandler))
 	mux.HandleFunc("/api/upload", AuthMiddleware(UploadImageHandler))
@@ -1212,9 +1597,16 @@ func Server() {
 		// server := &http.Server{
 		Addr:    ":" + port,
 		Handler: mux,
+		// A Context carries a deadline, a cancellation signal, and other values across API boundaries.
+		// Base context is a function field, while listenAndServe is a method (Method is a permanent built in capability of a type,
+		// while a function field is a "plugin slot" that you fill with custom logic during initialization)
 		BaseContext: func(l net.Listener) context.Context {
-			ctx := context.Background() // initalize a new context
-			ctx = context.WithValue(ctx, keyServerAddr, l.Addr().String())
+			// l is for asking before the server starts handling traffic. Most common: "Where are you listening?"
+			// If you set your Addr to ":0", you don't know the port until the server actually starts.
+			// By using l.Addr().String(), you capture the real,
+			// final port and bake it into the context so your handlers can find it later.
+			ctx := context.Background()                                    // initalize a new context
+			ctx = context.WithValue(ctx, keyServerAddr, l.Addr().String()) // This is like assigning the same value with its old one and the new one
 			return ctx
 		},
 	}
@@ -1230,9 +1622,11 @@ func Server() {
 	// go func() {
 	err := serverOne.ListenAndServe() // accept zero paraemter because it's not the same function from http.
 	// start the server with ListenAndServe, the same as you have before, but this time you don’t need to provide parameters
-	// to the function like you did with http.ListenAndServe because the http.Server values have already been configured.
+	// to the function like you did with http.ListenAndServe because the http.Server values have already been configured within the struct above.
 	if errors.Is(err, http.ErrServerClosed) {
 		fmt.Printf("server one closed\n")
+		// If you didn't have that if check, your logs would scream "ERROR: Server Closed!" every time you turned it off,
+		// which would be very confusing for a developer.
 	} else if err != nil {
 		fmt.Printf("error listenting for server one: %s\n", err)
 	}

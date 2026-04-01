@@ -7,6 +7,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/joho/godotenv"
 	"google.golang.org/api/drive/v3"
 	"google.golang.org/api/option"
 )
@@ -37,7 +38,13 @@ func InitDriveService() {
 
 func main() {
 
-	InitDriveService()
+	// Get the variable from env file
+	err0 := godotenv.Load("dburi.env")
+	if err0 != nil {
+		log.Fatal("Error loading .env file")
+	}
+
+	// InitDriveService()
 	// 1. CONNECT TO DATABASE FIRST
 	// ConnectDB initializes the global MongoClient and MoviesCollection
 	fmt.Printf("Starting application...\n")
